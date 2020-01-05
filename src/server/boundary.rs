@@ -6,23 +6,21 @@
 // copied, modified, or distributed except according to those terms.
 extern crate twoway;
 
-use futures_core::{Poll, Stream};
+use futures_core::Stream;
 
-use std::{fmt, mem};
+use std::{fmt, mem, task::Poll::{self, *}};
 
 use super::PushChunk;
 use crate::BodyChunk;
 
 use self::State::*;
 use futures_core::stream::TryStream;
-use futures_core::Poll::*;
+use futures_core::*;
 
 use super::helpers::*;
 use crate::server::Error;
 use futures_core::task::Context;
 use std::pin::Pin;
-
-pub type PollOpt<T, E> = Poll<Option<Result<T, E>>>;
 
 /// A struct implementing `Read` and `BufRead` that will yield bytes until it sees a given sequence.
 pub struct BoundaryFinder<S: TryStream> {
@@ -63,9 +61,9 @@ where
         macro_rules! try_ready_opt (
             ($try:expr) => (
                 match $try {
-                    Poll::Ready(Some(Ok(val))) => val,
-                    Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e.into()))),
-                    Poll::Ready(None) => {
+                    Ready(Some(Ok(val))) => val,
+                    Ready(Some(Err(e))) => return Ready(Some(Err(e.into()))),
+                    Ready(None) => {
                         set_state!(self = End);
                         return Ready(None);
                     }
@@ -74,12 +72,12 @@ where
             );
             ($try:expr; $restore:expr) => (
                 match $try {
-                    Poll::Ready(Some(Ok(val))) => val,
-                    Poll::Ready(Some(Err(e))) => {
+                    Ready(Some(Ok(val))) => val,
+                    Ready(Some(Err(e))) => {
                         set_state!(self = $restore);
-                        return Poll::Ready(Some(Err(e.into())));
+                        return Ready(Some(Err(e.into())));
                     },
-                    Poll::Ready(None) => {
+                    Ready(None) => {
                         set_state!(self = End);
                         return Ready(None);
                     },

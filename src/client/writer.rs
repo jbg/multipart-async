@@ -15,7 +15,7 @@ use futures_core::Stream;
 use futures_util::TryStreamExt;
 use http::header::HeaderName;
 use mime::Mime;
-use tokio_io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub struct MultipartWriter<W> {
     inner: W,
@@ -50,7 +50,7 @@ impl<W> MultipartWriter<W> {
         }
 
         if let Some(content_type) = content_type {
-            write!(header, "\r\nContent-Type: {}", content_type);
+            write!(header, "\r\nContent-Type: {}", content_type).unwrap();
         }
 
         header.push_str("\r\n\r\n");
@@ -79,7 +79,7 @@ impl<W: AsyncWrite + Unpin> MultipartWriter<W> {
         content_type: Option<&Mime>,
     ) -> io::Result<()> {
         let mut header = Cursor::new(self.get_field_header(name, filename, content_type));
-        header.copy(&mut self.inner).await?;
+        tokio::io::copy(&mut header, &mut self.inner).await?;
         self.data_written = true;
         Ok(())
     }
@@ -109,7 +109,7 @@ impl<W: AsyncWrite + Unpin> MultipartWriter<W> {
     ) -> io::Result<&mut Self> {
         self.write_field_header(name, filename, content_type)
             .await?;
-        contents.copy(&mut self.inner).await?;
+        tokio::io::copy(&mut contents, &mut self.inner).await?;
         self.inner.write_all(b"\r\n").await?;
         Ok(self)
     }
@@ -120,10 +120,10 @@ impl<W: AsyncWrite + Unpin> MultipartWriter<W> {
     /// Errors from the stream will be wrapped as `io::ErrorKind::Other`.
     pub async fn write_stream<B, E, S>(
         &mut self,
-        name: &str,
-        filename: Option<&str>,
-        content_type: Option<&Mime>,
-        mut contents: S,
+        _name: &str,
+        _filename: Option<&str>,
+        _content_type: Option<&Mime>,
+        contents: S,
     ) -> io::Result<&mut Self>
     where
         B: AsRef<[u8]>,

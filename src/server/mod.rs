@@ -12,10 +12,12 @@
 //!
 //! See the `Multipart` struct for more info.
 use std::fmt;
+use std::future::Future;
 use std::pin::Pin;
+use std::task::Poll;
 
 use futures_core::task::{self, Context};
-use futures_core::{Future, Poll, Stream};
+use futures_core::Stream;
 use http::{Method, Request};
 use mime::Mime;
 
@@ -44,10 +46,6 @@ macro_rules! ret_err (
     ($($args:tt)+) => (
         return fmt_err!($($args)+).into();
     )
-);
-
-macro_rules! ret_ok(
-    ($expr:expr) => (return Ok($expr).into());
 );
 
 macro_rules! fmt_err (
@@ -178,13 +176,14 @@ where
     /// If a field was previously being read, its contents will be discarded.
     ///
     /// ```rust
-    /// # #[macro_use] extern crate futures;
-    /// use futures::prelude::*;
-    /// # use std::iter;
-    /// # use futures_test::task::noop_context;
     /// # use std::convert::Infallible;
-    /// use multipart_async::server::Multipart;
     /// use std::error::Error;
+    /// # use std::iter;
+    /// use std::pin::Pin;
+    /// use std::task::Poll;
+    /// use futures::prelude::*;
+    /// # use futures_test::task::noop_context;
+    /// use multipart_async::server::Multipart;
     ///
     /// async fn example<S>(stream: S) -> Result<(), Box<dyn Error>>
     ///         where S: TryStream<Ok = &'static [u8]> + Unpin, S::Error: Error + 'static
@@ -207,9 +206,8 @@ where
     /// }
     /// # let stream = stream::empty().map(Result::<&'static [u8], Infallible>::Ok);
     /// # let ref mut cx = noop_context();
-    /// # let future = example(stream);
-    /// # pin_mut!(future);
-    /// # while let futures::Poll::Pending = future.as_mut().poll(cx) {}
+    /// # let mut future = example(stream).boxed();
+    /// # while let Poll::Pending = future.as_mut().poll(cx) {}
     /// ```
     pub fn next_field(&mut self) -> NextField<S>
     where

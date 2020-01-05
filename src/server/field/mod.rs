@@ -6,12 +6,13 @@
 // copied, modified, or distributed except according to those terms.
 
 use std::fmt;
+use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::task::Poll::*;
+use std::task::Poll::{self, *};
 use std::{mem, str};
 
-use futures_core::{Future, Poll, Stream, TryStream};
+use futures_core::{Stream, TryStream};
 //pub use self::collect::{ReadTextField, TextField};
 use futures_core::task::Context;
 
@@ -44,10 +45,6 @@ impl<'a, S: TryStream + 'a> NextField<'a, S> {
             multipart: Some(multipart),
             has_next_field: false,
         }
-    }
-
-    fn multipart(&mut self) -> Option<Pin<&mut Multipart<S>>> {
-        Some(self.multipart.as_mut()?.as_mut())
     }
 }
 
