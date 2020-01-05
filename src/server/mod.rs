@@ -26,7 +26,7 @@ use crate::BodyChunk;
 
 use self::boundary::BoundaryFinder;
 use self::field::ReadHeaders;
-pub use self::field::{Field, FieldData, FieldHeaders, NextField, ReadToString};
+pub use self::field::{Field, FieldData, FieldHeaders, IntoNextField, NextField, ReadToString};
 use std::borrow::Cow;
 use std::convert::Infallible;
 use std::str::Utf8Error;
@@ -183,7 +183,7 @@ where
     /// use std::task::Poll;
     /// use futures::prelude::*;
     /// # use futures_test::task::noop_context;
-    /// use multipart_async::server::Multipart;
+    /// use multipart_async::server::{FieldData, Multipart};
     ///
     /// async fn example<S>(stream: S) -> Result<(), Box<dyn Error>>
     ///         where S: TryStream<Ok = &'static [u8]> + Unpin, S::Error: Error + 'static
@@ -214,6 +214,10 @@ where
         Self: Unpin,
     {
         NextField::new(Pin::new(self))
+    }
+
+    pub fn into_next_field(self) -> IntoNextField<S> {
+        IntoNextField::new(self)
     }
 
     /// Same as [`.next_field()`](#method.next_field) but with a receiver of `Pin<&mut Self>`.

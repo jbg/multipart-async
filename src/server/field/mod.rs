@@ -5,19 +5,19 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::rc::Rc;
-use std::task::Poll::{self, *};
-use std::{mem, str};
+use std::{
+    fmt,
+    future::Future,
+    mem,
+    pin::Pin,
+    rc::Rc,
+    str,
+    task::{Context, Poll::{self, *}},
+};
 
 use futures_core::{Stream, TryStream};
-//pub use self::collect::{ReadTextField, TextField};
-use futures_core::task::Context;
 
-use crate::server::Error::Utf8;
-use crate::server::{Error, PushChunk};
+use crate::server::{Error, Error::Utf8, PushChunk};
 use crate::BodyChunk;
 
 use super::boundary::BoundaryFinder;
@@ -39,9 +39,23 @@ pub struct NextField<'a, S: TryStream + 'a> {
     has_next_field: bool,
 }
 
+pub struct IntoNextField<S: TryStream> {
+    multipart: Option<Multipart<S>>,
+    has_next_field: bool,
+}
+
 impl<'a, S: TryStream + 'a> NextField<'a, S> {
     pub(crate) fn new(multipart: Pin<&'a mut Multipart<S>>) -> Self {
         NextField {
+            multipart: Some(multipart),
+            has_next_field: false,
+        }
+    }
+}
+
+impl<S: TryStream> IntoNextField<S> {
+    pub(crate) fn new(multipart: Multipart<S>) -> Self {
+        IntoNextField {
             multipart: Some(multipart),
             has_next_field: false,
         }
@@ -54,7 +68,7 @@ where
     S::Ok: BodyChunk,
     Error<S::Error>: From<S::Error>,
 {
-    type Output = super::Result<Option<Field<'a, S>>, S::Error>;
+    type Output = super::Result<Option<Field<FieldDataBorrowed<'a, S>>>, S::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // since we can't use `?` with `Option<...>` in this context
@@ -86,7 +100,53 @@ where
 
         Ready(Ok(Some(Field {
             headers: ready!(multipart!(get).poll_field_headers(cx)?),
-            data: FieldData {
+            data: FieldDataBorrowed {
+                multipart: multipart!(take),
+            },
+            _priv: (),
+        })))
+    }
+}
+
+impl<S> Future for IntoNextField<S>
+where
+    S: TryStream + Unpin + 'static,
+    S::Ok: BodyChunk + Unpin,
+    Error<S::Error>: From<S::Error>,
+{
+    type Output = super::Result<Option<Field<FieldDataOwned<S>>>, S::Error>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // since we can't use `?` with `Option<...>` in this context
+        macro_rules! multipart {
+            (get) => {
+                if let Some(ref mut multipart) = self.multipart {
+                    Pin::new(multipart)
+                } else {
+                    return Ready(Ok(None));
+                }
+            };
+            (take) => {
+                if let Some(multipart) = self.multipart.take() {
+                    multipart
+                } else {
+                    return Ready(Ok(None));
+                }
+            };
+        }
+
+        // `false` and `multipart = Some` means we haven't polled for next field yet
+        self.has_next_field =
+            self.has_next_field || ready!(multipart!(get).poll_has_next_field(cx)?);
+
+        if !self.has_next_field {
+            // end of stream, next `?` will return
+            self.multipart = None;
+        }
+
+        Ready(Ok(Some(Field {
+            headers: ready!(multipart!(get).poll_field_headers(cx)?),
+            data: FieldDataOwned {
                 multipart: multipart!(take),
             },
             _priv: (),
@@ -97,15 +157,15 @@ where
 /// A single field in a multipart stream.
 ///
 /// The data of the field is provided as a `Stream` impl in the `data` field.
-pub struct Field<'a, S: TryStream + 'a> {
+pub struct Field<D> {
     /// The headers of this field, including the name, filename, and `Content-Type`, if provided.
     pub headers: FieldHeaders,
     /// The data of this field in the request, represented as a stream of chunks.
-    pub data: FieldData<'a, S>,
+    pub data: D,
     _priv: (),
 }
 
-impl<S: TryStream> fmt::Debug for Field<'_, S> {
+impl<D> fmt::Debug for Field<D> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Field")
             .field("headers", &self.headers)
@@ -118,33 +178,28 @@ impl<S: TryStream> fmt::Debug for Field<'_, S> {
 ///
 /// It may be read to completion via the `Stream` impl, or collected to a string with
 /// `.read_to_string()`.
-pub struct FieldData<'a, S: TryStream + 'a> {
+pub struct FieldDataBorrowed<'a, S: TryStream + 'a> {
     multipart: Pin<&'a mut Multipart<S>>,
 }
 
-impl<S: TryStream> FieldData<'_, S>
-where
-    S::Ok: BodyChunk,
-    Error<S::Error>: From<S::Error>,
-{
-    /// Return a `Future` which yields the result of reading this field's data to a `String`.
-    ///
-    /// ### Note: UTF-8 Only
-    /// Reading to a string using a non-UTF-8 charset is currently outside of the scope of this
-    /// crate. Most browsers send form requests using the same charset as the page
-    /// the form resides in, so as long as you only serve UTF-8 encoded pages, this would only
-    /// realistically happen in one of two cases:
-    ///
-    /// * a non-browser client like cURL was specifically instructed by the user to
-    /// use a non-UTF-8 charset, or:
-    /// * the field is actually a text file encoded in a charset that is not UTF-8
-    /// (most likely Windows-1252 or UTF-16).
-    pub fn read_to_string(self) -> ReadToString<Self> {
+pub struct FieldDataOwned<S: TryStream> {
+    multipart: Multipart<S>,
+}
+
+pub trait FieldData<'a, S: TryStream> {
+    fn read_to_string(self) -> ReadToString<Self>
+    where
+        Self: TryStream + Unpin + Sized
+    {
         ReadToString::new(self)
     }
 }
 
-impl<S: TryStream> Stream for FieldData<'_, S>
+impl<'a, S: TryStream + 'a> FieldData<'a, S> for FieldDataBorrowed<'a, S> {}
+
+impl<S: TryStream> FieldData<'static, S> for FieldDataOwned<S> {}
+
+impl<S: TryStream> Stream for FieldDataBorrowed<'_, S>
 where
     S::Ok: BodyChunk,
     Error<S::Error>: From<S::Error>,
@@ -153,6 +208,19 @@ where
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         self.multipart.as_mut().poll_field_chunk(cx)
+    }
+}
+
+impl<S: TryStream> Stream for FieldDataOwned<S>
+where
+    S: Unpin,
+    S::Ok: BodyChunk + Unpin,
+    Error<S::Error>: From<S::Error>,
+{
+    type Item = super::Result<S::Ok, S::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.multipart).poll_field_chunk(cx)
     }
 }
 

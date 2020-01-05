@@ -22,7 +22,7 @@ use std::cmp;
 use crate::server::fuzzing::*;
 
 use crate::helpers::show_bytes;
-use crate::server::{Multipart, PushChunk, ReadToString};
+use crate::server::{FieldData, Multipart, PushChunk, ReadToString};
 use std::convert::Infallible;
 
 /// Deterministically chunk test data so the fuzzer can discover new code paths
