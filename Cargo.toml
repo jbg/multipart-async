@@ -10,7 +10,7 @@ edition = "2018"
 categories = ["web-programming::http-client", "web-programming::http-server", "asynchronous"]
 
 [dependencies]
-bytes = "0.4.4"
+bytes = "0.5.3"
 display_bytes = "0.2.1"
 http = "0.1.0"
 log = "0.4"
