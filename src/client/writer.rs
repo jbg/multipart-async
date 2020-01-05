@@ -37,7 +37,7 @@ impl<W> MultipartWriter<W> {
         name: &str,
         filename: Option<&str>,
         content_type: Option<&Mime>,
-    ) -> String {
+    ) -> io::Result<String> {
         use std::fmt::Write;
 
         let mut header = format!(
@@ -46,16 +46,18 @@ impl<W> MultipartWriter<W> {
         );
 
         if let Some(filename) = filename {
-            write!(header, "; filename=\"{}\"", filename).unwrap();
+            write!(header, "; filename=\"{}\"", filename)
+                .map_err(|_| io::Error::from(io::ErrorKind::Other))?;
         }
 
         if let Some(content_type) = content_type {
-            write!(header, "\r\nContent-Type: {}", content_type).unwrap();
+            write!(header, "\r\nContent-Type: {}", content_type)
+                .map_err(|_| io::Error::from(io::ErrorKind::Other))?;
         }
 
         header.push_str("\r\n\r\n");
 
-        header
+        Ok(header)
     }
 
     pub fn get_ref(&self) -> &W {
@@ -78,7 +80,7 @@ impl<W: AsyncWrite + Unpin> MultipartWriter<W> {
         filename: Option<&str>,
         content_type: Option<&Mime>,
     ) -> io::Result<()> {
-        let mut header = Cursor::new(self.get_field_header(name, filename, content_type));
+        let mut header = Cursor::new(self.get_field_header(name, filename, content_type)?);
         tokio::io::copy(&mut header, &mut self.inner).await?;
         self.data_written = true;
         Ok(())

@@ -270,17 +270,6 @@ fn utf8_char_width(first: u8) -> Option<usize> {
 }
 
 #[test]
-fn assert_types_unpin() {
-    use crate::test_util::assert_unpin;
-
-    fn inner<'a, S: TryStream + 'a>() {
-        assert_unpin::<FieldData<'a, S>>();
-    }
-
-    // `Unpin` is checked on `ReadToString` in `test_read_to_string()`.
-}
-
-#[test]
 fn test_read_to_string() {
     use crate::test_util::mock_stream;
     use futures_util::TryFutureExt;
